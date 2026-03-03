@@ -9,10 +9,17 @@
 
 import { ROUTING_BLOCK } from "./routing-block.mjs";
 
-// Read stdin (SessionStart hook input — may be empty or minimal JSON)
-let raw = "";
-process.stdin.setEncoding("utf-8");
-for await (const chunk of process.stdin) raw += chunk;
+// Event-based flowing mode avoids two platform bugs:
+// - `for await (process.stdin)` hangs on macOS when piped via spawnSync
+// - `readFileSync(0)` throws EOF/EISDIR on Windows, EAGAIN on Linux
+const raw = await new Promise((resolve, reject) => {
+  let data = "";
+  process.stdin.setEncoding("utf-8");
+  process.stdin.on("data", (chunk) => { data += chunk; });
+  process.stdin.on("end", () => resolve(data));
+  process.stdin.on("error", reject);
+  process.stdin.resume();
+});
 
 // Output the routing block as additionalContext
 console.log(JSON.stringify({
