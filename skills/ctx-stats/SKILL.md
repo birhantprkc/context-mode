@@ -1,9 +1,9 @@
 ---
-name: stats
+name: ctx-stats
 description: |
   Show how much context window context-mode saved this session.
   Displays token consumption, context savings ratio, and per-tool breakdown.
-  Trigger: /context-mode:stats
+  Trigger: /context-mode:ctx-stats
 user_invocable: true
 ---
 

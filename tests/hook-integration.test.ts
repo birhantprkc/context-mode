@@ -9,7 +9,7 @@ import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -482,7 +482,6 @@ async function main() {
   try { rmSync(ISOLATED_HOME, { recursive: true, force: true }); } catch {}
   try { rmSync(MOCK_PROJECT_DIR, { recursive: true, force: true }); } catch {}
 
-
   // ===== PLUGIN TOOL NAME FORMAT =====
   // When installed via Claude Code plugin marketplace, tool names follow:
   //   mcp__plugin_<plugin-id>_<server-name>__<tool-name>
@@ -540,6 +539,44 @@ async function main() {
     const cmd = parsed.hookSpecificOutput.updatedInput.command;
     assert.ok(cmd.includes(PLUGIN_PREFIX + "execute"), "Expected plugin-format execute in inline-HTTP redirect");
     assert.ok(!cmd.includes(SHORT_PREFIX + "execute"), "Inline-HTTP redirect must not contain short-form execute");
+  });
+
+  // ===== SKILL COMMANDS (ctx- prefix) =====
+  console.log("\n--- Skill Commands ---\n");
+
+  const SKILLS_DIR = join(__dirname, "..", "skills");
+
+  await test("ctx-doctor skill directory exists with valid SKILL.md", () => {
+    const skillMd = join(SKILLS_DIR, "ctx-doctor", "SKILL.md");
+    assert.ok(existsSync(skillMd), "skills/ctx-doctor/SKILL.md must exist");
+    const content = readFileSync(skillMd, "utf-8");
+    assert.ok(content.includes("name: ctx-doctor"), "SKILL.md name must be ctx-doctor");
+    assert.ok(content.includes("/context-mode:ctx-doctor"), "Trigger must reference ctx-doctor");
+  });
+
+  await test("ctx-upgrade skill directory exists with valid SKILL.md", () => {
+    const skillMd = join(SKILLS_DIR, "ctx-upgrade", "SKILL.md");
+    assert.ok(existsSync(skillMd), "skills/ctx-upgrade/SKILL.md must exist");
+    const content = readFileSync(skillMd, "utf-8");
+    assert.ok(content.includes("name: ctx-upgrade"), "SKILL.md name must be ctx-upgrade");
+    assert.ok(content.includes("/context-mode:ctx-upgrade"), "Trigger must reference ctx-upgrade");
+  });
+
+  await test("ctx-stats skill directory exists with valid SKILL.md", () => {
+    const skillMd = join(SKILLS_DIR, "ctx-stats", "SKILL.md");
+    assert.ok(existsSync(skillMd), "skills/ctx-stats/SKILL.md must exist");
+    const content = readFileSync(skillMd, "utf-8");
+    assert.ok(content.includes("name: ctx-stats"), "SKILL.md name must be ctx-stats");
+    assert.ok(content.includes("/context-mode:ctx-stats"), "Trigger must reference ctx-stats");
+  });
+
+  await test("old skill directories (doctor, upgrade, stats) no longer exist", () => {
+    for (const old of ["doctor", "upgrade", "stats"]) {
+      assert.ok(
+        !existsSync(join(SKILLS_DIR, old)),
+        `Old skill directory skills/${old} must not exist`,
+      );
+    }
   });
 
   // ===== SUMMARY =====
