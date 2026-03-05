@@ -162,22 +162,13 @@ Full hook config including PreCompress: [`configs/gemini-cli/settings.json`](con
 {
   "hooks": {
     "PreToolUse": [
-      {
-        "matcher": "",
-        "hooks": [{ "type": "command", "command": "node ./node_modules/context-mode/hooks/vscode-copilot/pretooluse.mjs" }]
-      }
+      { "type": "command", "command": "node ./node_modules/context-mode/hooks/vscode-copilot/pretooluse.mjs" }
     ],
     "PostToolUse": [
-      {
-        "matcher": "",
-        "hooks": [{ "type": "command", "command": "node ./node_modules/context-mode/hooks/vscode-copilot/posttooluse.mjs" }]
-      }
+      { "type": "command", "command": "node ./node_modules/context-mode/hooks/vscode-copilot/posttooluse.mjs" }
     ],
     "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [{ "type": "command", "command": "node ./node_modules/context-mode/hooks/vscode-copilot/sessionstart.mjs" }]
-      }
+      { "type": "command", "command": "node ./node_modules/context-mode/hooks/vscode-copilot/sessionstart.mjs" }
     ]
   }
 }
@@ -198,10 +189,11 @@ Full hook config including PreCompact: [`configs/vscode-copilot/hooks.json`](con
 
 ```json
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "context-mode": {
-      "command": "npx",
-      "args": ["-y", "context-mode"]
+      "type": "local",
+      "command": ["npx", "-y", "context-mode"]
     }
   },
   "plugin": ["context-mode"]
