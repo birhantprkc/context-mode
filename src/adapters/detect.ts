@@ -20,11 +20,43 @@ import { resolve } from "node:path";
 import { homedir } from "node:os";
 
 import type { PlatformId, DetectionSignal, HookAdapter } from "./types.js";
+import { CLIENT_NAME_TO_PLATFORM } from "./client-map.js";
 
 /**
  * Detect the current platform by checking env vars and config dirs.
+ *
+ * @param clientInfo - Optional MCP clientInfo from initialize handshake.
+ *   When provided, takes highest priority (zero-config detection).
  */
-export function detectPlatform(): DetectionSignal {
+export function detectPlatform(clientInfo?: { name: string; version?: string }): DetectionSignal {
+  // ── Highest priority: MCP clientInfo ──────────────────
+  if (clientInfo?.name) {
+    const platform = CLIENT_NAME_TO_PLATFORM[clientInfo.name];
+    if (platform) {
+      return {
+        platform,
+        confidence: "high",
+        reason: `MCP clientInfo.name="${clientInfo.name}"`,
+      };
+    }
+  }
+
+  // ── Explicit platform override ────────────────────────
+  const platformOverride = process.env.CONTEXT_MODE_PLATFORM;
+  if (platformOverride) {
+    const validPlatforms: PlatformId[] = [
+      "claude-code", "gemini-cli", "opencode", "codex",
+      "vscode-copilot", "cursor", "antigravity", "kiro",
+    ];
+    if (validPlatforms.includes(platformOverride as PlatformId)) {
+      return {
+        platform: platformOverride as PlatformId,
+        confidence: "high",
+        reason: `CONTEXT_MODE_PLATFORM=${platformOverride} override`,
+      };
+    }
+  }
+
   // ── High confidence: environment variables ─────────────
 
   if (process.env.CLAUDE_PROJECT_DIR || process.env.CLAUDE_SESSION_ID) {
@@ -164,6 +196,16 @@ export async function getAdapter(platform?: PlatformId): Promise<HookAdapter> {
     case "cursor": {
       const { CursorAdapter } = await import("./cursor/index.js");
       return new CursorAdapter();
+    }
+
+    case "antigravity": {
+      const { AntigravityAdapter } = await import("./antigravity/index.js");
+      return new AntigravityAdapter();
+    }
+
+    case "kiro": {
+      const { KiroAdapter } = await import("./kiro/index.js");
+      return new KiroAdapter();
     }
 
     default: {

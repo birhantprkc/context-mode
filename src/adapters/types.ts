@@ -299,6 +299,8 @@ export type PlatformId =
   | "codex"
   | "vscode-copilot"
   | "cursor"
+  | "antigravity"
+  | "kiro"
   | "unknown";
 
 /** Detection signal used to identify which platform is running. */

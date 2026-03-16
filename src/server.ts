@@ -1774,11 +1774,15 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  // Write routing instructions for hookless platforms (e.g. Codex CLI)
+  // Write routing instructions for hookless platforms (e.g. Codex CLI, Antigravity)
   try {
     const { detectPlatform, getAdapter } = await import("./adapters/detect.js");
-    const signal = detectPlatform();
+    const clientInfo = server.server.getClientVersion();
+    const signal = detectPlatform(clientInfo ?? undefined);
     const adapter = await getAdapter(signal.platform);
+    if (clientInfo) {
+      console.error(`MCP client: ${clientInfo.name} v${clientInfo.version} → ${signal.platform}`);
+    }
     if (!adapter.capabilities.sessionStart) {
       const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
       const projectDir = process.env.CLAUDE_PROJECT_DIR ?? process.env.CODEX_HOME ?? process.cwd();

@@ -6,6 +6,8 @@ import { OpenCodeAdapter } from "../../src/adapters/opencode/index.js";
 import { CodexAdapter } from "../../src/adapters/codex/index.js";
 import { VSCodeCopilotAdapter } from "../../src/adapters/vscode-copilot/index.js";
 import { CursorAdapter } from "../../src/adapters/cursor/index.js";
+import { AntigravityAdapter } from "../../src/adapters/antigravity/index.js";
+import { KiroAdapter } from "../../src/adapters/kiro/index.js";
 
 // ─────────────────────────────────────────────────────────
 // detectPlatform — env var detection
@@ -30,6 +32,7 @@ describe("detectPlatform", () => {
     delete process.env.CURSOR_TRACE_ID;
     delete process.env.VSCODE_PID;
     delete process.env.VSCODE_CWD;
+    delete process.env.CONTEXT_MODE_PLATFORM;
     vi.restoreAllMocks();
   });
 
@@ -141,6 +144,83 @@ describe("detectPlatform", () => {
     expect(signal.confidence).toBe("high");
   });
 
+  // ── MCP clientInfo detection ─────────────────────────────
+
+  it("returns antigravity when clientInfo name is antigravity-client", () => {
+    const signal = detectPlatform({ name: "antigravity-client", version: "1.0" });
+    expect(signal.platform).toBe("antigravity");
+    expect(signal.confidence).toBe("high");
+    expect(signal.reason).toContain("clientInfo");
+  });
+
+  it("returns kiro when clientInfo name is Kiro CLI", () => {
+    const signal = detectPlatform({ name: "Kiro CLI", version: "1.0.0" });
+    expect(signal.platform).toBe("kiro");
+    expect(signal.confidence).toBe("high");
+  });
+
+  it("returns gemini-cli when clientInfo name is gemini-cli-mcp-client", () => {
+    const signal = detectPlatform({ name: "gemini-cli-mcp-client", version: "1.0" });
+    expect(signal.platform).toBe("gemini-cli");
+    expect(signal.confidence).toBe("high");
+  });
+
+  it("returns cursor when clientInfo name is cursor-vscode", () => {
+    const signal = detectPlatform({ name: "cursor-vscode", version: "1.0" });
+    expect(signal.platform).toBe("cursor");
+    expect(signal.confidence).toBe("high");
+  });
+
+  it("clientInfo takes priority over env vars", () => {
+    process.env.CLAUDE_PROJECT_DIR = "/some/project";
+    const signal = detectPlatform({ name: "antigravity-client", version: "1.0" });
+    expect(signal.platform).toBe("antigravity");
+  });
+
+  it("unknown clientInfo falls through to env var detection", () => {
+    process.env.CLAUDE_PROJECT_DIR = "/some/project";
+    const signal = detectPlatform({ name: "some-unknown-client", version: "1.0" });
+    expect(signal.platform).toBe("claude-code");
+  });
+
+  // ── CONTEXT_MODE_PLATFORM override ──────────────────────
+
+  it("returns antigravity when CONTEXT_MODE_PLATFORM=antigravity", () => {
+    process.env.CONTEXT_MODE_PLATFORM = "antigravity";
+    const signal = detectPlatform();
+    expect(signal.platform).toBe("antigravity");
+    expect(signal.confidence).toBe("high");
+    expect(signal.reason).toContain("CONTEXT_MODE_PLATFORM");
+  });
+
+  it("returns kiro when CONTEXT_MODE_PLATFORM=kiro", () => {
+    process.env.CONTEXT_MODE_PLATFORM = "kiro";
+    const signal = detectPlatform();
+    expect(signal.platform).toBe("kiro");
+    expect(signal.confidence).toBe("high");
+    expect(signal.reason).toContain("CONTEXT_MODE_PLATFORM");
+  });
+
+  it("CONTEXT_MODE_PLATFORM takes priority over env vars", () => {
+    process.env.CONTEXT_MODE_PLATFORM = "antigravity";
+    process.env.CLAUDE_PROJECT_DIR = "/some/project";
+    const signal = detectPlatform();
+    expect(signal.platform).toBe("antigravity");
+  });
+
+  it("clientInfo takes priority over CONTEXT_MODE_PLATFORM", () => {
+    process.env.CONTEXT_MODE_PLATFORM = "codex";
+    const signal = detectPlatform({ name: "antigravity-client", version: "1.0" });
+    expect(signal.platform).toBe("antigravity");
+  });
+
+  it("invalid CONTEXT_MODE_PLATFORM is ignored", () => {
+    process.env.CONTEXT_MODE_PLATFORM = "not-a-platform";
+    process.env.CLAUDE_PROJECT_DIR = "/some/project";
+    const signal = detectPlatform();
+    expect(signal.platform).toBe("claude-code");
+  });
+
   // ── Fallback ───────────────────────────────────────────
 
   it("returns a valid platform as default when no env vars are set", () => {
@@ -183,6 +263,16 @@ describe("getAdapter", () => {
   it("returns CursorAdapter for cursor", async () => {
     const adapter = await getAdapter("cursor");
     expect(adapter).toBeInstanceOf(CursorAdapter);
+  });
+
+  it("returns AntigravityAdapter for antigravity", async () => {
+    const adapter = await getAdapter("antigravity");
+    expect(adapter).toBeInstanceOf(AntigravityAdapter);
+  });
+
+  it("returns KiroAdapter for kiro", async () => {
+    const adapter = await getAdapter("kiro");
+    expect(adapter).toBeInstanceOf(KiroAdapter);
   });
 
   it("returns ClaudeCodeAdapter for unknown platform", async () => {

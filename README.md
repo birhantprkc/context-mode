@@ -296,6 +296,67 @@ Global `~/.codex/AGENTS.md` applies to all projects. Project-level `./AGENTS.md`
 </details>
 
 <details>
+<summary><strong>Antigravity</strong> <sup>(Beta)</sup></summary>
+
+**Step 1 — Install globally:**
+
+```bash
+npm install -g context-mode
+```
+
+**Step 2 — Register the MCP server.** Add to `~/.gemini/antigravity/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "context-mode": {
+      "command": "context-mode"
+    }
+  }
+}
+```
+
+**Step 3 — Restart Antigravity.** On first MCP server startup, a `GEMINI.md` routing instructions file is auto-created in your project root. Antigravity reads `GEMINI.md` automatically and learns to prefer context-mode sandbox tools.
+
+**About hooks:** Antigravity does not support hooks — there is no public hook API. The `GEMINI.md` routing instructions file is the only enforcement method (~60% compliance). The model receives the instructions at session start and sometimes follows them, but there is no programmatic interception — it can run raw `run_command`, read large files via `view_file`, or bypass sandbox tools at any time.
+
+**Auto-detection:** context-mode detects Antigravity automatically via the MCP protocol handshake (`clientInfo.name`). No environment variables or manual platform configuration needed.
+
+Example MCP config: [`configs/antigravity/mcp_config.json`](configs/antigravity/mcp_config.json)
+Routing rules: [`configs/antigravity/GEMINI.md`](configs/antigravity/GEMINI.md)
+
+</details>
+
+<details>
+<summary><strong>Kiro</strong> <sup>(Beta)</sup></summary>
+
+**Step 1 — Install globally:**
+
+```bash
+npm install -g context-mode
+```
+
+**Step 2 — Register the MCP server.** Add to `.kiro/settings/mcp.json` in your project root (or `~/.kiro/settings/mcp.json` for global):
+
+```json
+{
+  "mcpServers": {
+    "context-mode": {
+      "command": "context-mode"
+    }
+  }
+}
+```
+
+**Step 3 — Restart Kiro.** On first MCP server startup, a `KIRO.md` routing instructions file is auto-created in your project root. Kiro reads `KIRO.md` automatically and learns to prefer context-mode sandbox tools.
+
+**About hooks:** Kiro hook-based session continuity will be added once Kiro CLI hooks are fully tested. The `KIRO.md` routing instructions file is the current enforcement method (~60% compliance).
+
+**Auto-detection:** context-mode detects Kiro automatically via the MCP protocol handshake (`clientInfo.name`). No environment variables or manual platform configuration needed.
+
+</details>
+
+<details>
 <summary><strong>Build Prerequisites</strong> <sup>(CentOS, RHEL, Alpine)</sup></summary>
 
 Context Mode uses [better-sqlite3](https://github.com/WiseLibs/better-sqlite3), which ships prebuilt native binaries for most platforms. On glibc >= 2.31 systems (Ubuntu 20.04+, Debian 11+, Fedora 34+, macOS, Windows), `npm install` works without any build tools.
@@ -385,15 +446,15 @@ Context Mode captures every meaningful event during your session and persists th
 
 Session continuity requires 4 hooks working together:
 
-| Hook | Role | Claude Code | Gemini CLI | VS Code Copilot | Cursor | OpenCode | Codex CLI |
-|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **PostToolUse** | Captures events after each tool call | Yes | Yes | Yes | Yes | Plugin | -- |
-| **UserPromptSubmit** | Captures user decisions and corrections | Yes | -- | -- | -- | -- | -- |
-| **PreCompact** | Builds snapshot before compaction | Yes | Yes | Yes | -- | Plugin | -- |
-| **SessionStart** | Restores state after compaction or resume | Yes | Yes | Yes | -- | -- | -- |
-| | **Session completeness** | **Full** | **High** | **High** | **Partial** | **High** | **--** |
+| Hook | Role | Claude Code | Gemini CLI | VS Code Copilot | Cursor | OpenCode | Codex CLI | Antigravity | Kiro |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **PostToolUse** | Captures events after each tool call | Yes | Yes | Yes | Yes | Plugin | -- | -- | -- |
+| **UserPromptSubmit** | Captures user decisions and corrections | Yes | -- | -- | -- | -- | -- | -- | -- |
+| **PreCompact** | Builds snapshot before compaction | Yes | Yes | Yes | -- | Plugin | -- | -- | -- |
+| **SessionStart** | Restores state after compaction or resume | Yes | Yes | Yes | -- | -- | -- | -- | -- |
+| | **Session completeness** | **Full** | **High** | **High** | **Partial** | **High** | **--** | **--** | **--** |
 
-> **Note:** Full session continuity (capture + snapshot + restore) works on **Claude Code**, **Gemini CLI**, **VS Code Copilot**, and **OpenCode**. **Cursor** captures tool events via `preToolUse`/`postToolUse`, but `sessionStart` is currently rejected by Cursor's validator ([forum report](https://forum.cursor.com/t/unknown-hook-type-sessionstart/149566)), so session restore after compaction is not available yet. **OpenCode** uses the `experimental.session.compacting` plugin hook for compaction recovery, but SessionStart is not yet available ([#14808](https://github.com/sst/opencode/issues/14808)), so startup/resume is not supported. Codex CLI has no hook support, so session tracking is not available.
+> **Note:** Full session continuity (capture + snapshot + restore) works on **Claude Code**, **Gemini CLI**, **VS Code Copilot**, and **OpenCode**. **Cursor** captures tool events via `preToolUse`/`postToolUse`, but `sessionStart` is currently rejected by Cursor's validator ([forum report](https://forum.cursor.com/t/unknown-hook-type-sessionstart/149566)), so session restore after compaction is not available yet. **OpenCode** uses the `experimental.session.compacting` plugin hook for compaction recovery, but SessionStart is not yet available ([#14808](https://github.com/sst/opencode/issues/14808)), so startup/resume is not supported. **Codex CLI**, **Antigravity**, and **Kiro** have no hook support in the current release, so session tracking is not available.
 
 <details>
 <summary><strong>What gets captured</strong></summary>
@@ -474,26 +535,32 @@ Detailed event data is also indexed into FTS5 for on-demand retrieval via `searc
 
 **Codex CLI** — No session support. No hooks means no event capture. Each compaction or new session starts fresh. The `AGENTS.md` routing instructions file is the only continuity mechanism.
 
+**Antigravity** — No session support. Same as Codex CLI — no hooks, no event capture. The `GEMINI.md` routing instructions file is auto-written on first MCP server startup. Auto-detected via MCP protocol handshake (`clientInfo.name`).
+
+**Kiro** — No session support in the current release. MCP-only. The `KIRO.md` routing instructions file is auto-written on first MCP server startup. Hook-based session continuity will be added once Kiro CLI hooks are fully tested. Auto-detected via MCP protocol handshake (`clientInfo.name`).
+
 </details>
 
 ## Platform Compatibility
 
-| Feature | Claude Code | Gemini CLI <sup>(Beta)</sup> | VS Code Copilot <sup>(Beta)</sup> | Cursor <sup>(Beta)</sup> | OpenCode <sup>(Beta)</sup> | Codex CLI <sup>(Beta)</sup> |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| MCP Server | Yes | Yes | Yes | Yes | Yes | Yes |
-| PreToolUse Hook | Yes | Yes | Yes | Yes | Plugin | -- |
-| PostToolUse Hook | Yes | Yes | Yes | Yes | Plugin | -- |
-| SessionStart Hook | Yes | Yes | Yes | -- | -- | -- |
-| PreCompact Hook | Yes | Yes | Yes | -- | Plugin | -- |
-| Can Modify Args | Yes | Yes | Yes | Yes | Plugin | -- |
-| Can Block Tools | Yes | Yes | Yes | Yes | Plugin | -- |
-| Utility Commands (ctx) | Yes | Yes | Yes | Yes | Yes | Yes |
-| Slash Commands | Yes | -- | -- | -- | -- | -- |
-| Plugin Marketplace | Yes | -- | -- | -- | -- | -- |
+| Feature | Claude Code | Gemini CLI <sup>(Beta)</sup> | VS Code Copilot <sup>(Beta)</sup> | Cursor <sup>(Beta)</sup> | OpenCode <sup>(Beta)</sup> | Codex CLI <sup>(Beta)</sup> | Antigravity <sup>(Beta)</sup> | Kiro <sup>(Beta)</sup> |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| MCP Server | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| PreToolUse Hook | Yes | Yes | Yes | Yes | Plugin | -- | -- | -- |
+| PostToolUse Hook | Yes | Yes | Yes | Yes | Plugin | -- | -- | -- |
+| SessionStart Hook | Yes | Yes | Yes | -- | -- | -- | -- | -- |
+| PreCompact Hook | Yes | Yes | Yes | -- | Plugin | -- | -- | -- |
+| Can Modify Args | Yes | Yes | Yes | Yes | Plugin | -- | -- | -- |
+| Can Block Tools | Yes | Yes | Yes | Yes | Plugin | -- | -- | -- |
+| Utility Commands (ctx) | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| Slash Commands | Yes | -- | -- | -- | -- | -- | -- | -- |
+| Plugin Marketplace | Yes | -- | -- | -- | -- | -- | -- | -- |
 
 > **OpenCode** uses a TypeScript plugin paradigm — hooks run as in-process functions via `tool.execute.before`, `tool.execute.after`, and `experimental.session.compacting`, providing the same routing enforcement and session continuity as shell-based hooks. SessionStart is not yet available ([#14808](https://github.com/sst/opencode/issues/14808)), but compaction recovery works via the plugin's compacting hook.
 >
-> **Codex CLI** does not support hooks. It relies solely on routing instruction files (`AGENTS.md`) for enforcement (~60% compliance).
+> **Codex CLI** and **Antigravity** do not support hooks. They rely solely on routing instruction files (`AGENTS.md` / `GEMINI.md`) for enforcement (~60% compliance). Antigravity is auto-detected via MCP protocol handshake — no manual platform configuration needed.
+>
+> **Kiro** is MCP-only in the current release. Hook-based enforcement will be added once Kiro CLI hooks are fully tested. Kiro is auto-detected via MCP protocol handshake (`clientInfo.name`).
 
 ### Routing Enforcement
 
@@ -507,6 +574,8 @@ Hooks intercept tool calls programmatically — they can block dangerous command
 | Cursor | Yes | -- | **~98% saved** | Manual tool choice |
 | OpenCode | Plugin | [`AGENTS.md`](configs/opencode/AGENTS.md) | **~98% saved** | ~60% saved |
 | Codex CLI | -- | [`AGENTS.md`](configs/codex/AGENTS.md) | -- | ~60% saved |
+| Antigravity | -- | [`GEMINI.md`](configs/antigravity/GEMINI.md) | -- | ~60% saved |
+| Kiro | -- | [`KIRO.md`](configs/kiro/KIRO.md) | -- | ~60% saved |
 
 Without hooks, one unrouted `curl` or Playwright snapshot can dump 56 KB into context — wiping out an entire session's worth of savings.
 
