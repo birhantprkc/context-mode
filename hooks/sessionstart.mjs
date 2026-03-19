@@ -20,9 +20,8 @@ import { writeSessionEventsFile, buildSessionDirective, getSessionEvents, getLat
 import { createSessionLoaders } from "./session-loaders.mjs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { createHash } from "node:crypto";
 
 // Resolve absolute path for imports (fileURLToPath for Windows compat)
 const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
@@ -94,19 +93,6 @@ try {
 
     // Write cleanup flag — resume will delete it if --continue follows
     writeFileSync(cleanupFlag, new Date().toISOString(), "utf-8");
-
-    // Clean content store DB for fresh start (no --continue).
-    // Content DB lives at ~/.context-mode/content/{hash}.db
-    if (previousWasFresh) {
-      try {
-        const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-        const contentHash = createHash("sha256").update(projectDir.replace(/\\/g, "/")).digest("hex").slice(0, 16);
-        const contentDb = join(homedir(), ".context-mode", "content", `${contentHash}.db`);
-        for (const suffix of ["", "-wal", "-shm"]) {
-          try { unlinkSync(contentDb + suffix); } catch { /* may not exist */ }
-        }
-      } catch { /* best effort */ }
-    }
 
     // Proactively capture CLAUDE.md files — Claude Code loads them as system
     // context at startup, invisible to PostToolUse hooks. We read them from
