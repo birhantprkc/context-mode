@@ -30,22 +30,113 @@ export interface PreparedStatement {
 }
 
 // ─────────────────────────────────────────────────────────
+// bun:sqlite adapter (#45)
+// ─────────────────────────────────────────────────────────
+
+/**
+ * Wraps a bun:sqlite Database to provide better-sqlite3-compatible API.
+ * Bridges: .pragma(), multi-statement .exec(), .get() null→undefined.
+ */
+export class BunSQLiteAdapter {
+  #raw: any;
+
+  constructor(rawDb: any) {
+    this.#raw = rawDb;
+  }
+
+  pragma(source: string): any {
+    const stmt = this.#raw.prepare(`PRAGMA ${source}`);
+    const rows = stmt.all();
+    if (!rows || rows.length === 0) return undefined;
+    // Multi-row pragmas (table_xinfo, etc.) → return array
+    if (rows.length > 1) return rows;
+    // Single-row: extract scalar value (e.g. journal_mode = "wal")
+    const values = Object.values(rows[0] as Record<string, unknown>);
+    return values.length === 1 ? values[0] : rows[0];
+  }
+
+  exec(sql: string): any {
+    // bun:sqlite .exec() is single-statement only.
+    // Split multi-statement SQL respecting string literals (don't split on ; inside quotes).
+    let current = "";
+    let inString: string | null = null;
+    for (let i = 0; i < sql.length; i++) {
+      const ch = sql[i];
+      if (inString) {
+        current += ch;
+        if (ch === inString) inString = null;
+      } else if (ch === "'" || ch === '"') {
+        current += ch;
+        inString = ch;
+      } else if (ch === ";") {
+        const trimmed = current.trim();
+        if (trimmed) this.#raw.prepare(trimmed).run();
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    const trimmed = current.trim();
+    if (trimmed) this.#raw.prepare(trimmed).run();
+    return this;
+  }
+
+  prepare(sql: string): any {
+    const stmt = this.#raw.prepare(sql);
+    return {
+      run: (...args: unknown[]) => stmt.run(...args),
+      get: (...args: unknown[]) => {
+        const r = stmt.get(...args);
+        return r === null ? undefined : r;
+      },
+      all: (...args: unknown[]) => stmt.all(...args),
+      iterate: (...args: unknown[]) => stmt.iterate(...args),
+    };
+  }
+
+  transaction(fn: (...args: any[]) => any): any {
+    return this.#raw.transaction(fn);
+  }
+
+  close(): void {
+    this.#raw.close();
+  }
+}
+
+// ─────────────────────────────────────────────────────────
 // Lazy loader
 // ─────────────────────────────────────────────────────────
 
 let _Database: typeof DatabaseConstructor | null = null;
 
 /**
- * Lazy-load better-sqlite3. Only resolves the native module on first call.
- * This allows the MCP server to start instantly even when the native addon
- * is not yet installed (marketplace first-run scenario).
+ * Lazy-load better-sqlite3. Falls back to bun:sqlite via BunSQLiteAdapter
+ * when better-sqlite3 is unavailable (Bun runtime, issue #45).
  */
 export function loadDatabase(): typeof DatabaseConstructor {
   if (!_Database) {
     const require = createRequire(import.meta.url);
-    _Database = require("better-sqlite3") as typeof DatabaseConstructor;
+    try {
+      _Database = require("better-sqlite3") as typeof DatabaseConstructor;
+    } catch {
+      // better-sqlite3 unavailable (Bun runtime) — wrap bun:sqlite
+      if (!(globalThis as any).Bun) {
+        throw new Error("better-sqlite3 failed to load and Bun runtime not detected");
+      }
+      // Compute module name at runtime to prevent esbuild from resolving at bundle time.
+      // esbuild constant-folds string concat but NOT Array.join().
+      const bunSqliteMod = ["bun", "sqlite"].join(":");
+      const BunDB = require(bunSqliteMod).Database;
+      _Database = function BunDatabaseFactory(path: string, opts?: any) {
+        const raw = new BunDB(path, {
+          readonly: opts?.readonly,
+          create: true,
+        });
+        return new BunSQLiteAdapter(raw);
+      } as any;
+    }
   }
-  return _Database;
+  return _Database!;
 }
 
 // ─────────────────────────────────────────────────────────

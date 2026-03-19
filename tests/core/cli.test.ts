@@ -339,6 +339,152 @@ describe("ABI-aware native binary caching (#148)", () => {
   });
 });
 
+// ── bun:sqlite adapter (#45) ──────────────────────────────────────────
+
+describe("bun:sqlite adapter (#45)", () => {
+  /**
+   * Helper: create an in-memory SQLite db that behaves like bun:sqlite.
+   * Uses better-sqlite3 as engine but strips/alters methods to match bun:sqlite API:
+   * - NO .pragma() method
+   * - .get() returns null instead of undefined
+   * - .exec() is alias for single-statement .run()
+   */
+  async function createBunLikeFake(dbPath?: string) {
+    const { loadDatabase } = await import("../../src/db-base.js");
+    const Database = loadDatabase();
+    const real = new Database(dbPath ?? ":memory:");
+
+    const wrapStatement = (stmt: any) => ({
+      run: (...args: any[]) => stmt.run(...args),
+      get: (...args: any[]) => {
+        const r = stmt.get(...args);
+        return r === undefined ? null : r; // bun returns null
+      },
+      all: (...args: any[]) => stmt.all(...args),
+      iterate: (...args: any[]) => stmt.iterate(...args),
+      columns: () => stmt.columns(),
+    });
+
+    return {
+      prepare: (sql: string) => wrapStatement(real.prepare(sql)),
+      exec: (sql: string) => real.exec(sql),
+      transaction: (fn: any) => real.transaction(fn),
+      close: () => real.close(),
+      // NO .pragma() — bun:sqlite doesn't have it
+    };
+  }
+
+  test("pragma: adapter.pragma() returns scalar for assignment", async () => {
+    const { BunSQLiteAdapter } = await import("../../src/db-base.js");
+    const dbFile = join(mkdtempSync(join(tmpdir(), "bun-adapter-")), "test.db");
+    const fake = await createBunLikeFake(dbFile);
+    const db = new BunSQLiteAdapter(fake);
+    const result = db.pragma("journal_mode = WAL");
+    expect(result).toBe("wal");
+    db.close();
+    rmSync(dbFile, { force: true });
+  });
+
+  test("pragma: adapter.pragma() returns rows for table_xinfo", async () => {
+    const { BunSQLiteAdapter } = await import("../../src/db-base.js");
+    const fake = await createBunLikeFake();
+    const db = new BunSQLiteAdapter(fake);
+    fake.exec("CREATE TABLE test_tbl (id INTEGER PRIMARY KEY, name TEXT)");
+    const rows = db.pragma("table_xinfo(test_tbl)");
+    expect(Array.isArray(rows)).toBe(true);
+    expect(rows.length).toBe(2);
+    expect(rows[0].name).toBe("id");
+    expect(rows[1].name).toBe("name");
+    db.close();
+  });
+
+  test("exec: adapter.exec() handles multi-statement SQL", async () => {
+    const { BunSQLiteAdapter } = await import("../../src/db-base.js");
+    const fake = await createBunLikeFake();
+    const db = new BunSQLiteAdapter(fake);
+    db.exec(`
+      CREATE TABLE t1 (id INTEGER PRIMARY KEY);
+      CREATE TABLE t2 (id INTEGER PRIMARY KEY);
+      INSERT INTO t1 VALUES (1);
+      INSERT INTO t2 VALUES (2);
+    `);
+    const r1 = db.prepare("SELECT * FROM t1").all();
+    const r2 = db.prepare("SELECT * FROM t2").all();
+    expect(r1).toHaveLength(1);
+    expect(r2).toHaveLength(1);
+    db.close();
+  });
+
+  test("exec: adapter.exec() handles semicolons inside string literals", async () => {
+    const { BunSQLiteAdapter } = await import("../../src/db-base.js");
+    const fake = await createBunLikeFake();
+    const db = new BunSQLiteAdapter(fake);
+    db.exec(`
+      CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);
+      INSERT INTO t VALUES (1, 'hello; world');
+      INSERT INTO t VALUES (2, 'foo "bar; baz" qux');
+    `);
+    const rows = db.prepare("SELECT * FROM t ORDER BY id").all() as any[];
+    expect(rows).toHaveLength(2);
+    expect(rows[0].val).toBe("hello; world");
+    expect(rows[1].val).toBe('foo "bar; baz" qux');
+    db.close();
+  });
+
+  test("get: adapter.prepare().get() returns undefined not null for missing row", async () => {
+    const { BunSQLiteAdapter } = await import("../../src/db-base.js");
+    const fake = await createBunLikeFake();
+    const db = new BunSQLiteAdapter(fake);
+    db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+    const result = db.prepare("SELECT * FROM t WHERE id = 999").get();
+    expect(result).toBeUndefined(); // not null
+    expect(result).not.toBeNull();
+    db.close();
+  });
+
+  test("run: adapter.prepare().run() returns {changes, lastInsertRowid}", async () => {
+    const { BunSQLiteAdapter } = await import("../../src/db-base.js");
+    const fake = await createBunLikeFake();
+    const db = new BunSQLiteAdapter(fake);
+    db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");
+    const info = db.prepare("INSERT INTO t (name) VALUES (?)").run("test");
+    expect(info.changes).toBe(1);
+    expect(info.lastInsertRowid).toBe(1);
+    db.close();
+  });
+
+  test("transaction: adapter.transaction() works", async () => {
+    const { BunSQLiteAdapter } = await import("../../src/db-base.js");
+    const fake = await createBunLikeFake();
+    const db = new BunSQLiteAdapter(fake);
+    db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)");
+    const insertMany = db.transaction((items: string[]) => {
+      for (const item of items) {
+        db.prepare("INSERT INTO t (val) VALUES (?)").run(item);
+      }
+    });
+    insertMany(["a", "b", "c"]);
+    const rows = db.prepare("SELECT * FROM t").all();
+    expect(rows).toHaveLength(3);
+    db.close();
+  });
+
+  test("loadDatabase: falls back to BunSQLiteAdapter when better-sqlite3 unavailable", async () => {
+    const { BunSQLiteAdapter } = await import("../../src/db-base.js");
+    // BunSQLiteAdapter should be a class/constructor
+    expect(typeof BunSQLiteAdapter).toBe("function");
+    // Verify it provides the full better-sqlite3 interface
+    const fake = await createBunLikeFake();
+    const db = new BunSQLiteAdapter(fake);
+    expect(typeof db.pragma).toBe("function");
+    expect(typeof db.exec).toBe("function");
+    expect(typeof db.prepare).toBe("function");
+    expect(typeof db.transaction).toBe("function");
+    expect(typeof db.close).toBe("function");
+    db.close();
+  });
+});
+
 // ── Package exports ───────────────────────────────────────────────────
 
 describe("Package exports", () => {

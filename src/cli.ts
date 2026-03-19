@@ -299,20 +299,20 @@ async function doctor(): Promise<number> {
     );
   }
 
-  // FTS5 / better-sqlite3
-  p.log.step("Checking FTS5 / better-sqlite3...");
+  // FTS5 / SQLite
+  p.log.step("Checking FTS5 / SQLite...");
   try {
-    const Database = (await import("better-sqlite3")).default;
+    const Database = (await import("./db-base.js")).loadDatabase();
     const db = new Database(":memory:");
     db.exec("CREATE VIRTUAL TABLE fts_test USING fts5(content)");
     db.exec("INSERT INTO fts_test(content) VALUES ('hello world')");
     const row = db.prepare("SELECT * FROM fts_test WHERE fts_test MATCH 'hello'").get() as { content: string } | undefined;
     db.close();
     if (row && row.content === "hello world") {
-      p.log.success(color.green("FTS5 / better-sqlite3: PASS") + " — native module works");
+      p.log.success(color.green("FTS5 / SQLite: PASS") + " — native module works");
     } else {
       criticalFails++;
-      p.log.error(color.red("FTS5 / better-sqlite3: FAIL") + " — query returned unexpected result");
+      p.log.error(color.red("FTS5 / SQLite: FAIL") + " — query returned unexpected result");
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

@@ -26,6 +26,7 @@ import {
 import { classifyNonZeroExit } from "./exit-classify.js";
 import { startLifecycleGuard } from "./lifecycle.js";
 import { getWorktreeSuffix } from "./session/db.js";
+import { loadDatabase } from "./db-base.js";
 const __pkg_dir = dirname(fileURLToPath(import.meta.url));
 const VERSION: string = (() => {
   for (const rel of ["../package.json", "./package.json"]) {
@@ -1544,8 +1545,7 @@ server.registerTool(
       );
 
       if (existsSync(sessionDbPath)) {
-        const require = createRequire(import.meta.url);
-        const Database = require("better-sqlite3");
+        const Database = loadDatabase();
         const sdb = new Database(sessionDbPath, { readonly: true });
 
         const eventTotal = sdb.prepare("SELECT COUNT(*) as cnt FROM session_events").get() as { cnt: number };
