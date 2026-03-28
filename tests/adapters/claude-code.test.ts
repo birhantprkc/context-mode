@@ -1,9 +1,11 @@
+import "../setup-home";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createHash } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { ClaudeCodeAdapter } from "../../src/adapters/claude-code/index.js";
+import { fakeHome, realHome } from "../setup-home";
 
 describe("ClaudeCodeAdapter", () => {
   let adapter: ClaudeCodeAdapter;
@@ -191,6 +193,12 @@ describe("ClaudeCodeAdapter", () => {
       expect(sessionDir).toBe(
         join(homedir(), ".claude", "context-mode", "sessions"),
       );
+    });
+
+    it("creates session dirs under fake HOME instead of the contributor real HOME", () => {
+      const sessionDir = adapter.getSessionDir();
+      expect(sessionDir.startsWith(fakeHome)).toBe(true);
+      expect(sessionDir.startsWith(join(realHome, ".claude", "context-mode"))).toBe(false);
     });
 
     it("DB path uses sha256 hash of projectDir", () => {
