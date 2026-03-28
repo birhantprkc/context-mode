@@ -790,3 +790,32 @@ describe("Hidden temp dirs (#186)", () => {
     expect(EXEC_SOURCE).not.toMatch(/tmpdir\(\),\s*"ctx-mode-"/);
   });
 });
+
+// ── Issue #187 follow-up: self-heal must fix ALL hook types, not just PreToolUse ──
+
+describe("Self-heal covers all hook types (#187)", () => {
+  const PRETOOLUSE_SOURCE = readFileSync(resolve(ROOT, "hooks/pretooluse.mjs"), "utf-8");
+
+  test("pretooluse.mjs self-heal iterates all hook types in settings.json", () => {
+    // Must NOT be scoped to only PreToolUse
+    // Old pattern: settings.hooks?.PreToolUse (only one type)
+    // New pattern: iterates Object.keys(settings.hooks) or similar
+    const selfHealSection = PRETOOLUSE_SOURCE.slice(
+      PRETOOLUSE_SOURCE.indexOf("Update hook path"),
+      PRETOOLUSE_SOURCE.indexOf("lazy cleanup"),
+    );
+    // Must iterate all hook types, not just PreToolUse
+    expect(selfHealSection).not.toContain("hooks?.PreToolUse");
+    expect(selfHealSection).toMatch(/Object\.keys|for\s*\(\s*const\s+\w+\s+(of|in)\s+.*hooks/);
+  });
+
+  test("pretooluse.mjs self-heal fixes all context-mode hook scripts", () => {
+    const selfHealSection = PRETOOLUSE_SOURCE.slice(
+      PRETOOLUSE_SOURCE.indexOf("Update hook path"),
+      PRETOOLUSE_SOURCE.indexOf("lazy cleanup"),
+    );
+    // Must match any .mjs hook script, not just pretooluse.mjs
+    expect(selfHealSection).toMatch(/\.mjs/);
+    expect(selfHealSection).toContain("context-mode");
+  });
+});
