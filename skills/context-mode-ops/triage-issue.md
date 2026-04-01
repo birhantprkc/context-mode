@@ -167,9 +167,9 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 git push origin next
 ```
 
-### 8. Comment on Issue
+### 8. Comment on Issue & Close
 
-After pushing to `next`, comment on the issue per [communication.md](communication.md):
+After pushing to `next`, comment and **close the issue immediately**:
 
 ```bash
 gh issue comment {N} --body "$(cat <<'EOF'
@@ -185,9 +185,14 @@ We investigated this and pushed a fix to the `next` branch ({commit_sha}).
 
 This will ship in the next release. Once it's out, could you please test it in your setup and let us know if it resolves the issue? 🙏
 
+If the fix doesn't work for you, feel free to reopen this issue.
+
 Thanks for reporting this!
 EOF
 )"
+
+# Close the issue — fix is pushed, job done
+gh issue close {N}
 ```
 
 ## Decision Tree: Fix vs. Wontfix vs. Needs Info
