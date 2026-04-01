@@ -377,6 +377,34 @@ describe("Shell Execution", () => {
     assert.ok(r.stdout.includes("sum: 30"));
   });
 
+  test("shell TMPDIR points to sandbox temp dir, not project root", async () => {
+    const r = await executor.execute({
+      language: "shell",
+      code: 'echo "$TMPDIR"',
+      timeout: 5_000,
+    });
+    const reported = r.stdout.trim();
+    assert.ok(
+      !reported.startsWith(process.cwd()),
+      `TMPDIR should not be project root, got: ${reported}`,
+    );
+    assert.ok(
+      reported.includes(".ctx-mode-"),
+      `TMPDIR should be the sandbox temp dir, got: ${reported}`,
+    );
+  });
+
+  test("shell TMPDIR works cross-platform (not just echo)", async () => {
+    // Use a command that writes to TMPDIR to verify it's writable
+    const r = await executor.execute({
+      language: "shell",
+      code: 'touch "$TMPDIR/ctx-test-file" && echo "ok"',
+      timeout: 5_000,
+    });
+    assert.equal(r.exitCode, 0);
+    assert.ok(r.stdout.trim() === "ok");
+  });
+
   test("Shell: for loop + wc", async () => {
     const r = await executor.execute({
       language: "shell",

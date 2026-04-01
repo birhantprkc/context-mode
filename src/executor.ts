@@ -13,6 +13,25 @@ import type { ExecResult } from "./types.js";
 
 const isWin = process.platform === "win32";
 
+/**
+ * Resolve the real OS temp directory, bypassing any TMPDIR env override.
+ * os.tmpdir() reads TMPDIR from the environment, which some shells/tools
+ * set to the project root — causing temp files to pollute the working tree.
+ */
+const OS_TMPDIR = (() => {
+  if (isWin) return process.env.TEMP ?? process.env.TMP ?? tmpdir();
+  try {
+    const result = execFileSync(
+      process.platform === "darwin" ? "getconf" : "mktemp",
+      process.platform === "darwin" ? ["DARWIN_USER_TEMP_DIR"] : ["-u", "-d"],
+      { env: { ...process.env, TMPDIR: undefined as unknown as string }, encoding: "utf-8" },
+    ).trim();
+    const dir = process.platform === "darwin" ? result : resolve(result, "..");
+    if (dir && dir !== process.cwd()) return dir;
+  } catch { /* fall through */ }
+  return "/tmp";
+})();
+
 /** Kill process tree — on Windows uses taskkill /T; on Unix kills the process group. */
 function killTree(proc: ReturnType<typeof spawn>): void {
   if (isWin && proc.pid) {
@@ -74,7 +93,7 @@ export class PolyglotExecutor {
 
   async execute(opts: ExecuteOptions): Promise<ExecResult> {
     const { language, code, timeout = 30_000, background = false } = opts;
-    const tmpDir = mkdtempSync(join(tmpdir(), ".ctx-mode-"));
+    const tmpDir = mkdtempSync(join(OS_TMPDIR, ".ctx-mode-"));
 
     try {
       const filePath = this.#writeScript(tmpDir, code, language);
@@ -89,7 +108,7 @@ export class PolyglotExecutor {
       // and other project-aware tools work naturally. Non-shell languages
       // run in the temp directory where their script file is written.
       const cwd = language === "shell" ? this.#projectRoot : tmpDir;
-      const result = await this.#spawn(cmd, cwd, timeout, background);
+      const result = await this.#spawn(cmd, cwd, tmpDir, timeout, background);
 
       // Skip tmpDir cleanup if process was backgrounded — it may still need files
       if (!result.backgrounded) {
@@ -185,12 +204,13 @@ export class PolyglotExecutor {
     }
 
     // Run
-    return this.#spawn([binPath], cwd, timeout);
+    return this.#spawn([binPath], cwd, cwd, timeout);
   }
 
   async #spawn(
     cmd: string[],
     cwd: string,
+    sandboxTmpDir: string,
     timeout: number,
     background = false,
   ): Promise<ExecResult> {
@@ -216,7 +236,7 @@ export class PolyglotExecutor {
       const proc = spawn(spawnCmd, spawnArgs, {
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
-        env: this.#buildSafeEnv(cwd),
+        env: this.#buildSafeEnv(sandboxTmpDir),
         shell: needsShell,
         // On Unix, create a new process group so killTree can kill all children
         detached: !isWin,
