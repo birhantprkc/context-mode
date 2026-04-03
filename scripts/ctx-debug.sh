@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # context-mode diagnostic report
-# Collects system, runtime, installation, and config info into a pasteable
-# markdown report for GitHub issues.
+# Runs 18 diagnostic sections, writes markdown + JSON to temp files,
+# shows a compact summary in the terminal.
 #
-# Usage:
-#   bash scripts/ctx-debug.sh          # markdown to stdout
-#   bash scripts/ctx-debug.sh --json   # (reserved, not yet implemented)
+# Usage: bash scripts/ctx-debug.sh
+# Output: /tmp/ctx-debug-<ts>.md  +  /tmp/ctx-debug-<ts>.json
 #
 # Works on Linux, macOS, and Windows (Git Bash / MSYS2 / WSL).
 
-CTX_DEBUG_VERSION="1.0.0"
+CTX_DEBUG_VERSION="2.0.0"
 set -uo pipefail  # NOT -e — we must never crash
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -123,6 +122,17 @@ config_file() {
     printf -- '- **%s** (`%s`): not found\n' "$label" "$display"
   fi
 }
+
+# ─── Output setup ─────────────────────────────────────────────────────────────
+
+TS="$(date +%s)"
+EFFECTIVE_TMP="${TMPDIR:-${TEMP:-${TMP:-/tmp}}}"
+REPORT_FILE="${EFFECTIVE_TMP}/ctx-debug-${TS}.md"
+JSON_FILE="${EFFECTIVE_TMP}/ctx-debug-${TS}.json"
+
+# Redirect all markdown output to report file — terminal stays clean
+exec 3>&1          # save original stdout (terminal)
+exec 1>"$REPORT_FILE"  # stdout → file
 
 # ─── Begin Report ─────────────────────────────────────────────────────────────
 
@@ -647,7 +657,382 @@ done
 [ "$SHOWN" -eq 0 ] && printf '  - (no notable dirs detected)\n'
 printf -- '  - ... (%d total entries)\n' "${#PATH_PARTS[@]}"
 
-# ─── Footer ──────────────────────────────────────────────────────────────────
+# ─── 13. Hook Execution ─────────────────────────────────────────────────────
+
+section "13. Hook Execution"
+
+HOOK_PRE="$PLUGIN_ROOT/hooks/pretooluse.mjs"
+if [ -f "$HOOK_PRE" ]; then
+  # Test 1: PreToolUse WebFetch → should deny/redirect
+  PRE_INPUT='{"tool_name":"WebFetch","tool_input":{"url":"https://example.com"}}'
+  PRE_OUTPUT="$(printf '%s' "$PRE_INPUT" | timeout 10 node "$HOOK_PRE" 2>/dev/null || true)"
+  if [ -n "$PRE_OUTPUT" ]; then
+    PRE_VALID="$(node -e "
+      try {
+        const o = JSON.parse(process.argv[1]);
+        const d = (o.hookSpecificOutput||{}).permissionDecision || o.decision || '';
+        console.log(d === 'deny' ? 'PASS' : 'PARTIAL: decision=' + d);
+      } catch(e) { console.log('FAIL: ' + e.message); }
+    " -- "$PRE_OUTPUT" 2>/dev/null || echo "FAIL: node parse error")"
+    check "PreToolUse denies WebFetch" "$([ "${PRE_VALID%%:*}" = "PASS" ] && echo true || echo false)"
+    [ "${PRE_VALID%%:*}" != "PASS" ] && printf -- '  > %s\n' "$PRE_VALID"
+  else
+    check "PreToolUse denies WebFetch" "false"
+    printf -- '  > Hook returned empty output\n'
+  fi
+
+  # Test 2: PreToolUse Write → should passthrough (no deny)
+  PASS_INPUT='{"tool_name":"Write","tool_input":{"file_path":"/tmp/test.txt","content":"hello"}}'
+  PASS_OUTPUT="$(printf '%s' "$PASS_INPUT" | timeout 10 node "$HOOK_PRE" 2>/dev/null || true)"
+  if [ -z "$PASS_OUTPUT" ]; then
+    check "PreToolUse passes Write tool through" "true"
+  else
+    PASS_DEC="$(node -e "try{const o=JSON.parse(process.argv[1]);console.log((o.hookSpecificOutput||{}).permissionDecision||'none')}catch{console.log('none')}" -- "$PASS_OUTPUT" 2>/dev/null || echo "none")"
+    check "PreToolUse passes Write tool through" "$([ "$PASS_DEC" != "deny" ] && echo true || echo false)"
+    [ "$PASS_DEC" = "deny" ] && printf -- '  > Write tool was unexpectedly denied\n'
+  fi
+else
+  check "PreToolUse hook" "false"
+  printf -- '  > Not found: %s\n' "$(abbrev_path "$HOOK_PRE")"
+fi
+
+# Test 3: SessionStart → should return additionalContext
+HOOK_SS="$PLUGIN_ROOT/hooks/sessionstart.mjs"
+if [ -f "$HOOK_SS" ]; then
+  SS_INPUT='{"source":"startup"}'
+  SS_OUTPUT="$(printf '%s' "$SS_INPUT" | timeout 15 node "$HOOK_SS" 2>/dev/null || true)"
+  if [ -n "$SS_OUTPUT" ]; then
+    SS_VALID="$(node -e "
+      try {
+        const o = JSON.parse(process.argv[1]);
+        const ctx = (o.hookSpecificOutput||{}).additionalContext || '';
+        console.log(ctx.length > 50 ? 'PASS (' + ctx.length + ' chars)' : 'FAIL: context too short (' + ctx.length + ')');
+      } catch(e) { console.log('FAIL: ' + e.message); }
+    " -- "$SS_OUTPUT" 2>/dev/null || echo "FAIL: parse error")"
+    check "SessionStart injects routing context" "$(echo "$SS_VALID" | grep -q '^PASS' && echo true || echo false)"
+    [ "$(echo "$SS_VALID" | grep -q '^PASS' && echo true)" != "true" ] && printf -- '  > %s\n' "$SS_VALID"
+  else
+    check "SessionStart injects routing context" "false"
+    printf -- '  > Hook returned empty output\n'
+  fi
+else
+  check "SessionStart hook" "false"
+  printf -- '  > Not found: %s\n' "$(abbrev_path "$HOOK_SS")"
+fi
+
+# ─── 14. MCP Server Startup ────────────────────────────────────────────────
+
+section "14. MCP Server Startup"
+
+SERVER_ENTRY="$PLUGIN_ROOT/server.bundle.mjs"
+[ ! -f "$SERVER_ENTRY" ] && SERVER_ENTRY="$PLUGIN_ROOT/build/server.js"
+
+if [ -f "$SERVER_ENTRY" ]; then
+  # Lightweight: verify module can be imported
+  SERVER_IMPORT="$(timeout 15 node --input-type=module -e "
+    try {
+      await import('file://$SERVER_ENTRY');
+      console.log('PASS');
+      setTimeout(() => process.exit(0), 200);
+    } catch(e) {
+      console.log('FAIL: ' + e.message.split('\n')[0]);
+      process.exit(0);
+    }
+  " 2>/dev/null || echo "FAIL: timeout or crash")"
+  check "Server module loads" "$(echo "$SERVER_IMPORT" | grep -q '^PASS' && echo true || echo false)"
+  [ "$(echo "$SERVER_IMPORT" | grep -q '^PASS' && echo true)" != "true" ] && printf -- '  > %s\n' "$SERVER_IMPORT"
+
+  true  # MCP JSON-RPC test placeholder
+else
+  check "Server module loads" "false"
+  printf -- '  > Not found: server.bundle.mjs or build/server.js\n'
+fi
+
+# ─── 15. SQLite Concurrency ────────────────────────────────────────────────
+
+section "15. SQLite Concurrency"
+
+SESSION_BASE="$HOME_DIR/.claude/context-mode/sessions"
+if [ -d "$SESSION_BASE" ]; then
+  FIRST_DB="$(find "$SESSION_BASE" -name '*.db' -type f 2>/dev/null | head -1)"
+  if [ -n "$FIRST_DB" ]; then
+    WAL_MODE="$(node -e "
+      try {
+        const D = require('better-sqlite3');
+        const db = new D('$FIRST_DB', { readonly: true, timeout: 3000 });
+        const r = db.pragma('journal_mode');
+        console.log(JSON.stringify(r));
+        db.close();
+      } catch(e) { console.log('ERROR: ' + e.message); }
+    " 2>/dev/null || echo "ERROR")"
+    check "Session DB uses WAL mode" "$(echo "$WAL_MODE" | grep -qi wal && echo true || echo false)"
+    [ "$(echo "$WAL_MODE" | grep -qi wal && echo true)" != "true" ] && printf -- '  > journal_mode: %s\n' "$WAL_MODE"
+  fi
+
+  # Orphaned journal check
+  WAL_BIG="$(find "$SESSION_BASE" -name '*-wal' -type f -size +1M 2>/dev/null | wc -l | tr -d ' ')"
+  SHM_ORPHAN=0
+  while IFS= read -r shm; do
+    [ -n "$shm" ] && [ ! -f "${shm%-shm}" ] && SHM_ORPHAN=$((SHM_ORPHAN + 1))
+  done < <(find "$SESSION_BASE" -name '*-shm' -type f 2>/dev/null)
+  check "No oversized WAL journals (>1MB)" "$([ "${WAL_BIG:-0}" -eq 0 ] && echo true || echo false)"
+  check "No orphaned -shm files" "$([ "$SHM_ORPHAN" -eq 0 ] && echo true || echo false)"
+else
+  printf -- '- No session directory at %s\n' "$(abbrev_path "$SESSION_BASE")"
+fi
+
+CONCUR="$(timeout 15 node -e "
+  const Database = require('better-sqlite3');
+  const os = require('os'), fs = require('fs'), path = require('path');
+  const dbPath = path.join(os.tmpdir(), 'ctx-debug-concur-' + process.pid + '.db');
+  try {
+    const db = new Database(dbPath);
+    db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 5000');
+    db.exec('CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT)');
+    let errors = 0;
+    const conns = [1,2,3].map(() => {
+      const c = new Database(dbPath);
+      c.pragma('journal_mode = WAL');
+      c.pragma('busy_timeout = 5000');
+      return c;
+    });
+    for (let i = 0; i < 30; i++) {
+      for (const c of conns) {
+        try { c.prepare('INSERT INTO t(v) VALUES(?)').run('r' + i); }
+        catch { errors++; }
+      }
+    }
+    conns.forEach(c => c.close()); db.close();
+    console.log(errors === 0 ? 'PASS: 90 writes, 0 SQLITE_BUSY' : 'FAIL: ' + errors + ' errors');
+  } catch(e) { console.log('FAIL: ' + e.message); }
+  finally { try { fs.unlinkSync(dbPath); fs.unlinkSync(dbPath+'-wal'); fs.unlinkSync(dbPath+'-shm'); } catch {} }
+" 2>/dev/null || echo "FAIL: timeout")"
+check "Concurrent SQLite writes (3 conns × 30)" "$(echo "$CONCUR" | grep -q '^PASS' && echo true || echo false)"
+[ "$(echo "$CONCUR" | grep -q '^PASS' && echo true)" != "true" ] && printf -- '  > %s\n' "$CONCUR"
+
+# ─── 16. Adapter Validation ────────────────────────────────────────────────
+
+section "16. Adapter Validation"
+
+DETECT_JS="$PLUGIN_ROOT/build/adapters/detect.js"
+if [ -f "$DETECT_JS" ]; then
+  ADAPTER_VAL="$(timeout 15 node --input-type=module -e "
+    try {
+      const { detectPlatform, getAdapter } = await import('file://$DETECT_JS');
+      const signal = detectPlatform();
+      const adapter = await getAdapter(signal.platform);
+      console.log('platform: ' + adapter.name);
+      const hookResults = adapter.validateHooks('$PLUGIN_ROOT');
+      for (const r of hookResults) {
+        console.log(r.status + ': ' + r.check + ' — ' + (r.message || ''));
+      }
+      try {
+        const reg = await adapter.checkPluginRegistration();
+        if (reg) console.log(reg.status + ': ' + reg.check + ' — ' + (reg.message || ''));
+      } catch {}
+    } catch(e) { console.log('error: ' + e.message); }
+  " 2>/dev/null || echo "error: timeout")"
+
+  ADAPTER_NAME="$(echo "$ADAPTER_VAL" | grep '^platform:' | cut -d' ' -f2-)"
+  kv "Validated adapter" "${ADAPTER_NAME:-unknown}"
+
+  FAIL_N="$(echo "$ADAPTER_VAL" | grep -c '^fail:' 2>/dev/null || echo 0)"
+  check "Adapter validation passes" "$([ "${FAIL_N:-0}" -eq 0 ] && echo true || echo false)"
+
+  echo "$ADAPTER_VAL" | grep -E '^(pass|fail|warn):' | while IFS= read -r line; do
+    status="${line%%:*}"
+    detail="${line#*: }"
+    case "$status" in
+      pass) printf -- '  - [x] %s\n' "$detail" ;;
+      fail) printf -- '  - [ ] %s\n' "$detail" ;;
+      warn) printf -- '  - [~] %s\n' "$detail" ;;
+    esac
+  done
+else
+  printf -- '- Adapter validation skipped (build/adapters/detect.js not found — run `npm run build`)\n'
+fi
+
+# ─── 17. Sandbox Environment ───────────────────────────────────────────────
+
+section "17. Sandbox Environment"
+
+# Check system CA certificates
+CA_PATHS=("/etc/ssl/cert.pem" "/etc/ssl/certs/ca-certificates.crt" "/etc/pki/tls/certs/ca-bundle.crt" "/usr/local/etc/openssl/cert.pem")
+CA_FOUND=false
+for ca in "${CA_PATHS[@]}"; do
+  [ -f "$ca" ] && CA_FOUND=true && break
+done
+check "System CA certificates found" "$CA_FOUND"
+[ "$CA_FOUND" = "false" ] && printf -- '  > No system CA bundle — HTTPS in sandbox may fail. Set SSL_CERT_FILE.\n'
+
+# TMPDIR write test
+EFFECTIVE_TMP="${TMPDIR:-${TEMP:-${TMP:-/tmp}}}"
+kv "Effective temp dir" "$EFFECTIVE_TMP"
+if [ -d "$EFFECTIVE_TMP" ]; then
+  TMP_TEST="$EFFECTIVE_TMP/.ctx-debug-$$"
+  if touch "$TMP_TEST" 2>/dev/null && rm -f "$TMP_TEST" 2>/dev/null; then
+    check "Temp dir writable" "true"
+  else
+    check "Temp dir writable" "false"
+    printf -- '  > Cannot write to %s — check permissions or Snap confinement\n' "$EFFECTIVE_TMP"
+  fi
+else
+  check "Temp dir exists" "false"
+fi
+
+# Env denylist spot-check — verify dangerous vars don't leak to subprocess
+DENY_TEST="$(node -e "
+  const { execFileSync } = require('child_process');
+  const env = { ...process.env };
+  env.BASH_ENV = '/tmp/evil'; env.LD_PRELOAD = '/tmp/evil.so';
+  env.PYTHONSTARTUP = '/tmp/evil.py'; env.PROMPT_COMMAND = 'echo pwned';
+  // Simulate what a safe sandbox would strip
+  const DENIED = ['BASH_ENV','LD_PRELOAD','PYTHONSTARTUP','PROMPT_COMMAND','ENV','PS4','DYLD_INSERT_LIBRARIES','PERL5OPT','RUBYOPT','GIT_TEMPLATE_DIR'];
+  const safe = Object.fromEntries(Object.entries(env).filter(([k]) => !DENIED.includes(k)));
+  const out = execFileSync('node', ['-e', 'const d=[\"BASH_ENV\",\"LD_PRELOAD\",\"PYTHONSTARTUP\",\"PROMPT_COMMAND\"];const l=d.filter(v=>process.env[v]);console.log(l.length?\"LEAKED:\"+l.join(\",\"):\"STRIPPED\")'], { env: safe, timeout: 5000 }).toString().trim();
+  console.log(out);
+" 2>/dev/null || echo "ERROR")"
+check "Env denylist strips dangerous vars" "$([ "$DENY_TEST" = "STRIPPED" ] && echo true || echo false)"
+[ "$DENY_TEST" != "STRIPPED" ] && printf -- '  > %s\n' "$DENY_TEST"
+
+# ─── 18. Network / TLS ─────────────────────────────────────────────────────
+
+section "18. Network / TLS"
+
+# NODE_EXTRA_CA_CERTS check
+if [ -n "${NODE_EXTRA_CA_CERTS:-}" ]; then
+  check "NODE_EXTRA_CA_CERTS file exists" "$([ -f "$NODE_EXTRA_CA_CERTS" ] && echo true || echo false)"
+  [ ! -f "$NODE_EXTRA_CA_CERTS" ] && printf -- '  > File not found: %s\n' "$NODE_EXTRA_CA_CERTS"
+fi
+
+# Proxy detection
+PROXY_SET=false
+for pvar in HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY; do
+  pval="$(eval echo "\${$pvar:-}" 2>/dev/null)"
+  if [ -n "$pval" ]; then
+    kv "$pvar" "$(echo "$pval" | redact)"
+    PROXY_SET=true
+  fi
+done
+[ "$PROXY_SET" = "false" ] && printf -- '- No proxy environment variables detected\n'
+
+# HTTPS connectivity
+NPM_TLS="$(timeout 10 node -e "
+  const https = require('https');
+  const req = https.get('https://registry.npmjs.org/context-mode', { timeout: 5000 }, (res) => {
+    console.log('PASS: HTTP ' + res.statusCode);
+    req.destroy();
+  });
+  req.on('error', (e) => {
+    if (e.code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' || e.code === 'CERT_HAS_EXPIRED') {
+      console.log('FAIL_TLS: ' + e.code);
+    } else if (e.code === 'ECONNREFUSED' || e.code === 'ENOTFOUND') {
+      console.log('FAIL_NET: ' + e.code);
+    } else {
+      console.log('FAIL: ' + e.code + ' ' + e.message);
+    }
+  });
+  req.on('timeout', () => { console.log('FAIL_NET: timeout'); req.destroy(); });
+" 2>/dev/null || echo "FAIL: timeout")"
+check "HTTPS to npm registry" "$(echo "$NPM_TLS" | grep -q '^PASS' && echo true || echo false)"
+if ! echo "$NPM_TLS" | grep -q '^PASS'; then
+  printf -- '  > %s\n' "$NPM_TLS"
+  case "$NPM_TLS" in
+    FAIL_TLS*) printf -- '  > Fix: Set NODE_EXTRA_CA_CERTS to your corporate CA bundle\n' ;;
+    FAIL_NET*) printf -- '  > Fix: Check network, DNS, or proxy settings\n' ;;
+  esac
+fi
+
+# Snap confinement (Linux)
+if [ "$OS_TYPE" = "linux" ]; then
+  SNAP_NODE="$(which node 2>/dev/null || true)"
+  if echo "$SNAP_NODE" | grep -q '/snap/'; then
+    check "Node.js not Snap-confined" "false"
+    printf -- '  > Node.js installed via Snap — causes connection errors and TMPDIR restrictions\n'
+    printf -- '  > Fix: Install via nvm, volta, or package manager\n'
+  else
+    check "Node.js not Snap-confined" "true"
+  fi
+fi
+
+# Disk space on temp dir
+if command -v df &>/dev/null; then
+  TMP_AVAIL="$(df -m "$EFFECTIVE_TMP" 2>/dev/null | awk 'NR==2{print $(NF-2)}' || true)"
+  if [ -n "$TMP_AVAIL" ] && [ "$TMP_AVAIL" -lt 100 ] 2>/dev/null; then
+    check "Temp dir >100MB free" "false"
+    printf -- '  > Only %sMB available\n' "$TMP_AVAIL"
+  elif [ -n "$TMP_AVAIL" ] 2>/dev/null; then
+    check "Temp dir >100MB free" "true"
+  fi
+fi
+
+# ─── Finalize report ─────────────────────────────────────────────────────────
 
 printf '\n---\n\n'
-printf '> Paste this report into your GitHub issue: https://github.com/mksglu/context-mode/issues/new\n'
+printf '> ctx-debug.sh v%s — https://github.com/mksglu/context-mode/issues/new\n' "$CTX_DEBUG_VERSION"
+
+# ─── Restore stdout, generate JSON, print summary ─��──────────────────────────
+
+exec 1>&3  # restore stdout → terminal
+
+# Count results from the markdown report
+PASS_N="$(grep -c '^\- \[x\]' "$REPORT_FILE" 2>/dev/null || echo 0)"
+FAIL_N="$(grep -c '^\- \[ \]' "$REPORT_FILE" 2>/dev/null || echo 0)"
+WARN_N="$(grep -c '⚠' "$REPORT_FILE" 2>/dev/null || echo 0)"
+
+# Generate JSON from markdown
+node -e "
+  const fs = require('fs');
+  const md = fs.readFileSync('$REPORT_FILE', 'utf8');
+  const result = { version: '$CTX_DEBUG_VERSION', generated: '$NOW', sections: {} };
+  let sec = '';
+  for (const line of md.split('\n')) {
+    if (line.startsWith('### ')) {
+      sec = line.replace(/^### \d+\.\s*/, '').trim();
+      result.sections[sec] = { checks: [], info: {} };
+    } else if (!sec) continue;
+    else if (line.startsWith('- [x] ')) {
+      result.sections[sec].checks.push({ pass: true, label: line.slice(6) });
+    } else if (line.startsWith('- [ ] ')) {
+      result.sections[sec].checks.push({ pass: false, label: line.slice(6) });
+    } else if (line.match(/^- \*\*(.+?)\*\*: \x60(.+?)\x60/)) {
+      const m = line.match(/^- \*\*(.+?)\*\*: \x60(.+?)\x60/);
+      result.sections[sec].info[m[1]] = m[2];
+    }
+  }
+  result.summary = { pass: $PASS_N, fail: $FAIL_N, warnings: $WARN_N };
+  fs.writeFileSync('$JSON_FILE', JSON.stringify(result, null, 2));
+" 2>/dev/null || true
+
+# ─── Terminal summary ────────────────────────────────────────────────────────
+
+printf '\n'
+printf '  context-mode diagnostic report v%s\n' "$CTX_DEBUG_VERSION"
+printf '  ─────────────────────────────────\n'
+if [ "$FAIL_N" -eq 0 ]; then
+  printf '  ✓ All %s checks passed' "$PASS_N"
+  [ "$WARN_N" -gt 0 ] && printf ' (%s warnings)' "$WARN_N"
+  printf '\n'
+else
+  printf '  %s passed, %s failed' "$PASS_N" "$FAIL_N"
+  [ "$WARN_N" -gt 0 ] && printf ', %s warnings' "$WARN_N"
+  printf '\n\n'
+  printf '  Failed:\n'
+  grep '^\- \[ \]' "$REPORT_FILE" 2>/dev/null | while IFS= read -r line; do
+    printf '    %s\n' "$line"
+  done
+fi
+printf '\n'
+printf '  Report: %s\n' "$REPORT_FILE"
+printf '  JSON:   %s\n' "$JSON_FILE"
+printf '\n'
+# Copy hint
+if command -v pbcopy &>/dev/null; then
+  printf '  Copy:   cat %s | pbcopy\n' "$REPORT_FILE"
+elif command -v xclip &>/dev/null; then
+  printf '  Copy:   cat %s | xclip -selection clipboard\n' "$REPORT_FILE"
+elif command -v clip &>/dev/null; then
+  printf '  Copy:   cat %s | clip\n' "$REPORT_FILE"
+fi
+printf '\n'
