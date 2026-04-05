@@ -3,7 +3,50 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>context-mode</title>
+<title>context-mode — Save 98% of your AI coding agent's context window</title>
+<meta name="description" content="MCP plugin for Claude Code, Cursor, Copilot, and 12 platforms. Sandbox tool output, index it into FTS5, search on demand. 66,000+ developers. Open source.">
+<meta name="keywords" content="claude code context window, ai coding agent limit, context window optimization, mcp plugin, think in code, claude code limit fix, cursor context, copilot context">
+<link rel="canonical" href="https://context-mode.pages.dev">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="context-mode — The other half of the context problem">
+<meta property="og:description" content="Your AI coding agent burns through context in 20 minutes. context-mode keeps 98% of tool output out of the conversation. 66,000+ developers across 12 platforms.">
+<meta property="og:url" content="https://context-mode.pages.dev">
+<meta property="og:site_name" content="context-mode">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="context-mode — Save 98% of your AI coding agent's context window">
+<meta name="twitter:description" content="MCP plugin that sandboxes tool output and indexes it into FTS5. Your limit lasts 30x longer. Open source, 12 platforms.">
+<meta name="twitter:creator" content="@AcikAnaliz">
+
+<!-- Structured Data -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "context-mode",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS, Linux, Windows",
+  "description": "MCP plugin that saves 98% of AI coding agent context window by sandboxing tool output and indexing it into FTS5 for on-demand search.",
+  "url": "https://github.com/mksglu/context-mode",
+  "author": {
+    "@type": "Person",
+    "name": "B. Mert Köseoğlu",
+    "url": "https://mksg.lu"
+  },
+  "license": "https://github.com/mksglu/context-mode/blob/main/LICENSE",
+  "downloadUrl": "https://www.npmjs.com/package/context-mode",
+  "softwareVersion": "1.0.71",
+  "aggregateRating": {
+    "@type": "AggregateRating",
+    "ratingValue": "5",
+    "ratingCount": "6487"
+  }
+}
+</script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -88,7 +131,7 @@ code{font-family:var(--mono);font-size:.88em;background:var(--bg-code);color:var
 <!-- Hero -->
 <section class="hero rev">
   <p style="font-size:13px;color:var(--text-4);margin-bottom:1rem">by <a href="https://mksg.lu" style="color:var(--text-3)">B. Mert Köseoğlu</a></p>
-  <div class="hero-title">context-mode</div>
+  <h1 class="hero-title">context-mode</h1>
   <p class="hero-sub">The other half of the context problem.</p>
   <div class="hero-stats">
     <div class="hero-stat"><div class="val" id="stat-users">—</div><div class="lbl">users</div></div>
@@ -113,7 +156,7 @@ code{font-family:var(--mono);font-size:.88em;background:var(--bg-code);color:var
 <hr class="sep">
 
 <!-- Ch 1 -->
-<div class="chapter rev">
+<section class="chapter rev">
   <p class="section-label">The problem</p>
   <h2 class="section-title">The context window problem</h2>
   <div class="rule"></div>
@@ -155,7 +198,7 @@ code{font-family:var(--mono);font-size:.88em;background:var(--bg-code);color:var
 <hr class="sep">
 
 <!-- Ch 2 -->
-<div class="chapter rev">
+<section class="chapter rev">
   <p class="section-label">The solution</p>
   <h2 class="section-title">Intercept, sandbox, index</h2>
   <div class="rule"></div>
@@ -178,7 +221,7 @@ code{font-family:var(--mono);font-size:.88em;background:var(--bg-code);color:var
 <hr class="sep">
 
 <!-- Ch 3 -->
-<div class="chapter rev">
+<section class="chapter rev">
   <p class="section-label">Results</p>
   <h2 class="section-title">Measured, not estimated</h2>
   <div class="rule"></div>
@@ -198,7 +241,7 @@ code{font-family:var(--mono);font-size:.88em;background:var(--bg-code);color:var
 <hr class="sep">
 
 <!-- Ch 4 -->
-<div class="chapter rev">
+<section class="chapter rev">
   <p class="section-label">Paradigm</p>
   <h2 class="section-title">Think in Code</h2>
   <div class="rule"></div>
@@ -228,7 +271,7 @@ code{font-family:var(--mono);font-size:.88em;background:var(--bg-code);color:var
 <hr class="sep">
 
 <!-- Ch 5 -->
-<div class="chapter rev">
+<section class="chapter rev">
   <p class="section-label">Continuity</p>
   <h2 class="section-title">Your AI never starts from scratch</h2>
   <div class="rule"></div>
@@ -255,7 +298,7 @@ code{font-family:var(--mono);font-size:.88em;background:var(--bg-code);color:var
 <hr class="sep">
 
 <!-- Ch 6 -->
-<div class="chapter rev">
+<section class="chapter rev">
   <p class="section-label">Platforms</p>
   <h2 class="section-title">12 platforms, one plugin</h2>
   <div class="rule"></div>
@@ -270,7 +313,7 @@ code{font-family:var(--mono);font-size:.88em;background:var(--bg-code);color:var
 <hr class="sep">
 
 <!-- Security -->
-<div class="chapter rev">
+<section class="chapter rev">
   <p class="section-label">Security</p>
   <h2 class="section-title">Privacy-first. Your code never leaves your machine.</h2>
   <div class="rule"></div>
