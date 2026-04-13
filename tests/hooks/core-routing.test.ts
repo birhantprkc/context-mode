@@ -332,47 +332,30 @@ describe("routePreToolUse", () => {
     });
   });
 
-  // ─── Task routing ──────────────────────────────────────
+  // ─── Task routing (#241: removed — substring matching catches TaskCreate etc.) ──
 
-  describe("Task tool", () => {
-    it("injects ROUTING_BLOCK into prompt", () => {
+  describe("Task tool (#241)", () => {
+    it("returns null (passthrough) — no longer intercepted", () => {
       const result = routePreToolUse("Task", {
         prompt: "Analyze the codebase",
         subagent_type: "general-purpose",
       });
-      expect(result).not.toBeNull();
-      expect(result!.action).toBe("modify");
-      expect(result!.updatedInput).toBeDefined();
-      expect((result!.updatedInput as Record<string, string>).prompt).toContain(
-        "Analyze the codebase",
-      );
-      expect((result!.updatedInput as Record<string, string>).prompt).toContain(
-        "context_window_protection",
-      );
+      expect(result).toBeNull();
     });
 
-    it("upgrades Bash subagent to general-purpose", () => {
-      const result = routePreToolUse("Task", {
-        prompt: "Run some commands",
-        subagent_type: "Bash",
+    it("TaskCreate returns null (passthrough)", () => {
+      const result = routePreToolUse("TaskCreate", {
+        title: "my task",
       });
-      expect(result).not.toBeNull();
-      expect(result!.action).toBe("modify");
-      expect(
-        (result!.updatedInput as Record<string, string>).subagent_type,
-      ).toBe("general-purpose");
+      expect(result).toBeNull();
     });
 
-    it("keeps non-Bash subagent type unchanged", () => {
-      const result = routePreToolUse("Task", {
-        prompt: "Do research",
-        subagent_type: "general-purpose",
+    it("TaskUpdate returns null (passthrough)", () => {
+      const result = routePreToolUse("TaskUpdate", {
+        id: "123",
+        status: "done",
       });
-      expect(result).not.toBeNull();
-      expect(result!.action).toBe("modify");
-      expect(
-        (result!.updatedInput as Record<string, string>).subagent_type,
-      ).toBe("general-purpose");
+      expect(result).toBeNull();
     });
   });
 

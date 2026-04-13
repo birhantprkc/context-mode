@@ -271,15 +271,11 @@ describe("routePreToolUse with platform parameter", () => {
     expect(result!.reason).toContain("@context-mode/ctx_search");
   });
 
-  it("Task routing block uses opencode tool names when platform=opencode", () => {
+  it("Task is no longer routed — returns null (#241)", () => {
     const result = routePreToolUse("Task", {
       prompt: "Analyze the code",
     }, "/tmp", "opencode");
-    expect(result).not.toBeNull();
-    const prompt = (result!.updatedInput as Record<string, string>).prompt;
-    expect(prompt).toContain("context-mode_ctx_batch_execute");
-    expect(prompt).toContain("context-mode_ctx_search");
-    expect(prompt).not.toContain("mcp__plugin_context-mode_context-mode__");
+    expect(result).toBeNull();
   });
 
   it("Read guidance uses vscode-copilot tool names when platform=vscode-copilot", () => {

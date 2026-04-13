@@ -294,8 +294,8 @@ export function routePreToolUse(toolName, toolInput, projectDir, platform) {
     });
   }
 
-  // ─── Agent/Task: inject context-mode routing into subagent prompts ───
-  if (canonical === "Agent" || canonical === "Task") {
+  // ─── Agent: inject context-mode routing into subagent prompts ───
+  if (canonical === "Agent") {
     const subagentType = toolInput.subagent_type ?? "";
     // Detect the correct field name for the prompt/request/objective/question/query
     const fieldName = ["prompt", "request", "objective", "question", "query", "task"].find(f => f in toolInput) ?? "prompt";
