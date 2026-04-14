@@ -449,12 +449,17 @@ async function insight(port: number) {
   // Install deps
   if (!existsSync(join(cacheDir, "node_modules"))) {
     console.log("Installing dependencies (first run)...");
-    execSync("npm install --production=false", { cwd: cacheDir, stdio: "inherit", timeout: 120000 });
+    execSync("npm install --production=false", { cwd: cacheDir, stdio: "inherit", timeout: 300000 });
+    // Sentinel check: verify install completed (cold cache can timeout leaving partial node_modules)
+    if (!existsSync(join(cacheDir, "node_modules", "vite"))) {
+      rmSync(join(cacheDir, "node_modules"), { recursive: true, force: true });
+      throw new Error("npm install incomplete — please retry");
+    }
   }
 
   // Build
   console.log("Building dashboard...");
-  execSync("npx vite build", { cwd: cacheDir, stdio: "pipe", timeout: 30000 });
+  execSync("npx vite build", { cwd: cacheDir, stdio: "pipe", timeout: 60000 });
 
   // Start server
   const url = `http://localhost:${port}`;
@@ -462,9 +467,37 @@ async function insight(port: number) {
 
   const child = spawn("node", [join(cacheDir, "server.mjs")], {
     cwd: cacheDir,
-    env: { ...process.env, PORT: String(port) },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      INSIGHT_SESSION_DIR: join(homedir(), ".claude", "context-mode", "sessions"),
+      INSIGHT_CONTENT_DIR: join(homedir(), ".claude", "context-mode", "content"),
+    },
     stdio: "inherit",
   });
+
+  // Wait for server to be ready, then verify it started
+  await new Promise(r => setTimeout(r, 1500));
+
+  try {
+    const { request } = await import("node:http");
+    await new Promise<void>((resolve, reject) => {
+      const req = request(`http://127.0.0.1:${port}/api/overview`, { timeout: 3000 }, (res) => {
+        resolve();
+        res.resume();
+      });
+      req.on("error", reject);
+      req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+      req.end();
+    });
+  } catch {
+    console.error(`\nError: Port ${port} appears to be in use. Either a previous dashboard is still running, or another service is using this port.`);
+    console.error(`\nTo fix:`);
+    console.error(`  Kill the existing process: lsof -ti:${port} | xargs kill`);
+    console.error(`  Or use a different port:   context-mode insight ${port + 1}`);
+    child.kill();
+    process.exit(1);
+  }
 
   // Open browser
   const platform = process.platform;

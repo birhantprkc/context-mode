@@ -2137,8 +2137,13 @@ server.registerTool(
         execSync("npm install --production=false", {
           cwd: cacheDir,
           stdio: "pipe",
-          timeout: 120000,
+          timeout: 300000,
         });
+        // Sentinel check: verify install completed (cold cache can timeout leaving partial node_modules)
+        if (!existsSync(join(cacheDir, "node_modules", "vite"))) {
+          rmSync(join(cacheDir, "node_modules"), { recursive: true, force: true });
+          throw new Error("npm install incomplete — please retry");
+        }
         steps.push("Dependencies installed.");
       }
 
@@ -2147,7 +2152,7 @@ server.registerTool(
       execSync("npx vite build", {
         cwd: cacheDir,
         stdio: "pipe",
-        timeout: 30000,
+        timeout: 60000,
       });
       steps.push("Build complete.");
 
@@ -2155,7 +2160,12 @@ server.registerTool(
       const { spawn } = await import("node:child_process");
       const child = spawn("node", [join(cacheDir, "server.mjs")], {
         cwd: cacheDir,
-        env: { ...process.env, PORT: String(port) },
+        env: {
+          ...process.env,
+          PORT: String(port),
+          INSIGHT_SESSION_DIR: getSessionDir(),
+          INSIGHT_CONTENT_DIR: join(dirname(getSessionDir()), "content"),
+        },
         detached: true,
         stdio: "ignore",
       });
@@ -2163,6 +2173,28 @@ server.registerTool(
 
       // Wait for server to be ready
       await new Promise(r => setTimeout(r, 1500));
+
+      // Verify server is actually running
+      try {
+        const { request } = await import("node:http");
+        await new Promise<void>((resolve, reject) => {
+          const req = request(`http://127.0.0.1:${port}/api/overview`, { timeout: 3000 }, (res) => {
+            resolve();
+            res.resume();
+          });
+          req.on("error", reject);
+          req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+          req.end();
+        });
+      } catch {
+        // Server didn't start — likely port in use
+        return trackResponse("ctx_insight", {
+          content: [{
+            type: "text" as const,
+            text: `Port ${port} appears to be in use. Either a previous dashboard is still running, or another service is using this port.\n\nTo fix:\n- Kill the existing process: lsof -ti:${port} | xargs kill\n- Or use a different port: ctx_insight({ port: 4748 })`,
+          }],
+        });
+      }
 
       // Open browser (cross-platform)
       const url = `http://localhost:${port}`;

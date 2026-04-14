@@ -37,9 +37,8 @@ if (isBun) {
 }
 
 // ── Paths ────────────────────────────────────────────────
-const BASE = join(homedir(), ".claude", "context-mode");
-const CONTENT_DIR = join(BASE, "content");
-const SESSION_DIR = join(BASE, "sessions");
+const SESSION_DIR = process.env.INSIGHT_SESSION_DIR || join(homedir(), ".claude", "context-mode", "sessions");
+const CONTENT_DIR = process.env.INSIGHT_CONTENT_DIR || join(homedir(), ".claude", "context-mode", "content");
 const DIST_DIR = join(__dirname, "dist");
 
 // ── SQLite helpers ───────────────────────────────────────
