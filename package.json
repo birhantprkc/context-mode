@@ -46,6 +46,7 @@
     "build",
     "hooks",
     "configs",
+    "insight",
     "server.bundle.mjs",
     "cli.bundle.mjs",
     "skills",

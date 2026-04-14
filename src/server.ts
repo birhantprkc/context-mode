@@ -3,7 +3,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
-import { existsSync, unlinkSync, readdirSync, readFileSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { existsSync, unlinkSync, readdirSync, readFileSync, writeFileSync, rmSync, mkdirSync, cpSync, statSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, tmpdir } from "node:os";
@@ -2079,6 +2080,111 @@ server.registerTool(
         text: `Purged: ${deleted.join(", ")}. All session data for this project has been permanently deleted.`,
       }],
     });
+  },
+);
+
+// ── ctx-insight: analytics dashboard ──────────────────────────────────────────
+server.registerTool(
+  "ctx_insight",
+  {
+    title: "Open Insight Dashboard",
+    description:
+      "Opens the context-mode Insight dashboard in the browser. " +
+      "Shows personal analytics: session activity, tool usage, error rate, " +
+      "parallel work patterns, project focus, and actionable insights. " +
+      "First run installs dependencies (~30s). Subsequent runs open instantly.",
+    inputSchema: z.object({
+      port: z.number().optional().describe("Port to serve on (default: 4747)"),
+    }),
+  },
+  async ({ port: userPort }) => {
+    const port = userPort || 4747;
+    const insightSource = resolve(__pkg_dir, "insight");
+    // Use adapter-aware path: derive from sessions dir (works across all 12 adapters)
+    const sessDir = getSessionDir();
+    const cacheDir = join(dirname(sessDir), "insight-cache");
+
+    // Verify source exists
+    if (!existsSync(join(insightSource, "server.mjs"))) {
+      return trackResponse("ctx_insight", {
+        content: [{ type: "text" as const, text: "Error: Insight source not found in plugin. Try upgrading context-mode." }],
+      });
+    }
+
+    try {
+      const steps: string[] = [];
+
+      // Ensure cache dir
+      mkdirSync(cacheDir, { recursive: true });
+
+      // Copy source files if needed (check by comparing server.mjs mtime)
+      const srcMtime = statSync(join(insightSource, "server.mjs")).mtimeMs;
+      const cacheMtime = existsSync(join(cacheDir, "server.mjs"))
+        ? statSync(join(cacheDir, "server.mjs")).mtimeMs : 0;
+
+      if (srcMtime > cacheMtime) {
+        steps.push("Copying source files...");
+        cpSync(insightSource, cacheDir, { recursive: true, force: true });
+        steps.push("Source files copied.");
+      }
+
+      // Install deps if needed
+      const hasNodeModules = existsSync(join(cacheDir, "node_modules"));
+      if (!hasNodeModules) {
+        steps.push("Installing dependencies (first run, ~30s)...");
+        execSync("npm install --production=false", {
+          cwd: cacheDir,
+          stdio: "pipe",
+          timeout: 120000,
+        });
+        steps.push("Dependencies installed.");
+      }
+
+      // Build
+      steps.push("Building dashboard...");
+      execSync("npx vite build", {
+        cwd: cacheDir,
+        stdio: "pipe",
+        timeout: 30000,
+      });
+      steps.push("Build complete.");
+
+      // Start server in background
+      const { spawn } = await import("node:child_process");
+      const child = spawn("node", [join(cacheDir, "server.mjs")], {
+        cwd: cacheDir,
+        env: { ...process.env, PORT: String(port) },
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+
+      // Wait for server to be ready
+      await new Promise(r => setTimeout(r, 1500));
+
+      // Open browser (cross-platform)
+      const url = `http://localhost:${port}`;
+      const platform = process.platform;
+      try {
+        if (platform === "darwin") execSync(`open "${url}"`, { stdio: "pipe" });
+        else if (platform === "win32") execSync(`start "" "${url}"`, { stdio: "pipe" });
+        else execSync(`xdg-open "${url}" 2>/dev/null || sensible-browser "${url}" 2>/dev/null`, { stdio: "pipe" });
+      } catch { /* browser open is best-effort */ }
+
+      steps.push(`Dashboard running at ${url}`);
+
+      return trackResponse("ctx_insight", {
+        content: [{
+          type: "text" as const,
+          text: steps.map(s => `- ${s}`).join("\n") + `\n\nOpen: ${url}\nPID: ${child.pid} · Stop: kill ${child.pid}`,
+        }],
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return trackResponse("ctx_insight", {
+        content: [{ type: "text" as const, text: `Insight setup failed: ${msg}` }],
+      });
+    }
   },
 );
 
